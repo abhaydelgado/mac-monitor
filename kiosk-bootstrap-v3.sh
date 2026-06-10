@@ -194,8 +194,25 @@ echo "[+] Writing kiosk login hook (.bash_profile -> startx)"
 cat > "${KIOSK_HOME}/.bash_profile" <<'EOF'
 # Start the kiosk X session automatically on the first virtual terminal.
 # startx replaces this shell; when X exits, getty respawns and we come back.
+#
+# Failsafe: if X dies 3 times within 2 minutes, stop relaunching and leave a
+# usable shell on tty1 instead of a flicker loop. /tmp is cleared at boot, so
+# every boot gets fresh attempts; a reboot also retries.
 if [ -z "${DISPLAY:-}" ] && [ "${XDG_VTNR:-}" = "1" ]; then
-    exec startx /opt/kiosk/scripts/session.sh -- :0 vt1 -nolisten tcp
+    GUARD="/tmp/kiosk-x-failures"
+    NOW="$(date +%s)"
+    RECENT=0
+    if [ -f "$GUARD" ]; then
+        RECENT="$(awk -v now="$NOW" '$1 > now-120' "$GUARD" | wc -l)"
+    fi
+    if [ "$RECENT" -ge 3 ]; then
+        echo "kiosk: X failed $RECENT times in 2 minutes — staying in this shell."
+        echo "kiosk: check /opt/kiosk/logs/chromium.log and Xorg logs."
+        echo "kiosk: 'rm $GUARD' then log out, or reboot, to retry the kiosk."
+    else
+        echo "$NOW" >> "$GUARD"
+        exec startx /opt/kiosk/scripts/session.sh -- :0 vt1 -nolisten tcp
+    fi
 fi
 EOF
 
