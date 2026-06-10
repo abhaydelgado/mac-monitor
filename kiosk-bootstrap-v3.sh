@@ -164,6 +164,21 @@ fi
 
 chmod 644 "${KIOSK_CONF}"
 
+echo "[+] Writing Xorg config for Raspberry Pi KMS"
+# Bind the Pi's vc4 display driver to Xorg's modesetting driver. Without
+# this, X autoconfig on the Pi can fall back to legacy fbdev and die with
+# "Cannot run in framebuffer mode. Please specify busIDs for all
+# framebuffer devices". No effect on machines without vc4 (VMs etc).
+mkdir -p /etc/X11/xorg.conf.d
+cat > /etc/X11/xorg.conf.d/99-vc4-kms.conf <<'EOF'
+Section "OutputClass"
+    Identifier "vc4"
+    MatchDriver "vc4"
+    Driver "modesetting"
+    Option "PrimaryGPU" "true"
+EndSection
+EOF
+
 echo "[+] Setting default target to multi-user (no graphical.target / DM)"
 systemctl set-default multi-user.target
 
