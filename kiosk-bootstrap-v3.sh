@@ -59,6 +59,7 @@ apt-get install -y \
     xterm \
     unclutter \
     dbus-x11 \
+    dbus-user-session \
     fonts-liberation \
     fonts-noto-core \
     fonts-noto-color-emoji \
@@ -195,8 +196,16 @@ if [ -z "$CHROMIUM_BIN" ]; then
 fi
 log "Using chromium at $CHROMIUM_BIN"
 
-# Ensure a session bus exists for Chromium / unclutter.
-if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+# Snap apps must reach the systemd *user* instance over the user D-Bus to
+# create their tracking cgroup ("session-N.scope is not a snap cgroup"
+# otherwise). dbus-launch creates a detached bus with no systemd on it, so
+# prefer the real user bus and only fall back to dbus-launch if it's missing.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [ -S "${XDG_RUNTIME_DIR}/bus" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+    log "Using systemd user bus at ${XDG_RUNTIME_DIR}/bus"
+elif [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    log "WARNING: no user bus socket; falling back to dbus-launch (snaps may fail)"
     eval "$(dbus-launch --sh-syntax)"
 fi
 
