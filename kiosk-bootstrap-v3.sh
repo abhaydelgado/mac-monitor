@@ -125,7 +125,12 @@ cat > "${KIOSK_CONF}" <<'EOF'
 # Edit this file per kiosk, then `sudo reboot` (or restart the session).
 # ==============================================================================
 
-KIOSK_URL="http://192.168.10.233:8000/calendar.html?id=kiosk-facility"
+KIOSK_URL="http://192.168.10.233:8000/calendar.html"
+
+# Identity of this kiosk. Appended to KIOSK_URL as ?id=<KIOSK_ID> so the
+# server knows which display it is talking to when sending signals.
+# Give every kiosk a unique id.
+KIOSK_ID="kiosk-facility"
 
 # Remote DevTools port. Bound to 127.0.0.1 only — reach it with an SSH tunnel:
 #   ssh -L 9223:127.0.0.1:9223 kiosk@<device>
@@ -186,9 +191,19 @@ CONF="/etc/kiosk/kiosk.conf"
 [ -r "$CONF" ] && source "$CONF"
 
 : "${KIOSK_URL:=about:blank}"
+: "${KIOSK_ID:=}"
 : "${SCALE_FACTOR:=2}"
 : "${DEBUG_PORT:=9223}"
 : "${RESOLUTION:=auto}"
+
+# Append the kiosk identity to the URL (handles URLs with or without an
+# existing query string).
+if [ -n "$KIOSK_ID" ]; then
+    case "$KIOSK_URL" in
+        *\?*) KIOSK_URL="${KIOSK_URL}&id=${KIOSK_ID}" ;;
+        *)    KIOSK_URL="${KIOSK_URL}?id=${KIOSK_ID}" ;;
+    esac
+fi
 
 log() { logger -t kiosk-session "$*"; echo "kiosk-session: $*"; }
 
@@ -296,7 +311,10 @@ echo "[+] Writing openbox config (terminal escape hatch)"
 mkdir -p "${KIOSK_HOME}/.config/openbox"
 
 cp /etc/xdg/openbox/rc.xml "${KIOSK_HOME}/.config/openbox/rc.xml"
-sed -i 's|</keyboard>|  <keybind key="C-A-t"><action name="Execute"><command>xterm -fa Monospace -fs 14</command></action></keybind>\n  <keybind key="C-A-r"><action name="Execute"><command>sh -c "rm -f /tmp/kiosk-pause; pkill -f chromium"</command></action></keybind>\n  <keybind key="C-A-q"><action name="Execute"><command>sh -c "touch /tmp/kiosk-pause; pkill -f chromium"</command></action></keybind>\n</keyboard>|' \
+# Each action is bound to Ctrl+Alt and Ctrl+Super: keyboards with a
+# Mac/Windows switch swap Alt and Super at the key next to the spacebar,
+# so binding both means the same physical chord works in either mode.
+sed -i 's|</keyboard>|  <keybind key="C-A-t"><action name="Execute"><command>xterm -fa Monospace -fs 14</command></action></keybind>\n  <keybind key="C-W-t"><action name="Execute"><command>xterm -fa Monospace -fs 14</command></action></keybind>\n  <keybind key="C-A-r"><action name="Execute"><command>sh -c "rm -f /tmp/kiosk-pause; pkill -f chromium"</command></action></keybind>\n  <keybind key="C-W-r"><action name="Execute"><command>sh -c "rm -f /tmp/kiosk-pause; pkill -f chromium"</command></action></keybind>\n  <keybind key="C-A-q"><action name="Execute"><command>sh -c "touch /tmp/kiosk-pause; pkill -f chromium"</command></action></keybind>\n  <keybind key="C-W-q"><action name="Execute"><command>sh -c "touch /tmp/kiosk-pause; pkill -f chromium"</command></action></keybind>\n</keyboard>|' \
     "${KIOSK_HOME}/.config/openbox/rc.xml"
 
 cat > "${KIOSK_HOME}/.config/openbox/menu.xml" <<'EOF'
@@ -507,7 +525,10 @@ while True:
 
                 for c in codes:
                     if c in pressed:
-                        pressed[c] = key.keystate == 1
+                        # keystate 1 = down, 2 = autorepeat while held.
+                        # Counting only 1 made every hold self-reset as soon
+                        # as the keyboard started repeating.
+                        pressed[c] = key.keystate in (1, 2)
 
                 if all(pressed.values()):
                     if start is None:
