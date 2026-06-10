@@ -56,6 +56,7 @@ apt-get install -y \
     xauth \
     x11-xserver-utils \
     openbox \
+    xterm \
     unclutter \
     dbus-x11 \
     fonts-liberation \
@@ -179,6 +180,11 @@ CONF="/etc/kiosk/kiosk.conf"
 
 log() { logger -t kiosk-session "$*"; echo "kiosk-session: $*"; }
 
+# Persistent browser log (survives reboots, unlike /tmp). Truncated each
+# session start so a crash loop can't slowly fill the disk.
+CHROMIUM_LOG="/opt/kiosk/logs/chromium.log"
+: > "$CHROMIUM_LOG" 2>/dev/null || CHROMIUM_LOG="/tmp/kiosk-chromium.log"
+
 # Resolve Chromium at runtime (snap path or deb), independent of install method.
 CHROMIUM_BIN="$(command -v chromium-browser 2>/dev/null || command -v chromium 2>/dev/null || true)"
 [ -z "$CHROMIUM_BIN" ] && [ -x /snap/bin/chromium ] && CHROMIUM_BIN="/snap/bin/chromium"
@@ -213,6 +219,7 @@ while true; do
     log "Launching Chromium -> $KIOSK_URL"
     "$CHROMIUM_BIN" \
         --kiosk \
+        --disable-gpu \
         --start-fullscreen \
         --force-device-scale-factor="$SCALE_FACTOR" \
         --high-dpi-support=1 \
@@ -229,7 +236,7 @@ while true; do
         --remote-debugging-address=127.0.0.1 \
         --remote-debugging-port="$DEBUG_PORT" \
         "$KIOSK_URL" \
-        >/tmp/kiosk-chromium.log 2>&1 || true
+        >>"$CHROMIUM_LOG" 2>&1 || true
     log "Chromium exited; relaunching in 3s"
     sleep 3
 done
@@ -237,6 +244,40 @@ EOF
 
 chmod +x "${KIOSK_DIR}/scripts/session.sh"
 chown -R "${KIOSK_USER}:${KIOSK_USER}" "${KIOSK_HOME}/.bash_profile"
+# The session (running as kiosk) writes the browser log here.
+chown -R "${KIOSK_USER}:${KIOSK_USER}" "${KIOSK_DIR}/logs"
+
+echo "[+] Writing openbox config (terminal escape hatch)"
+# Ctrl+Alt+T opens a terminal and Ctrl+Alt+R restarts the browser — these are
+# openbox global grabs, so they work even with Chromium fullscreen on top.
+# The right-click root menu carries the same actions for when the browser is
+# down. `systemctl reboot` works unprivileged because the kiosk user holds an
+# active local logind session (polkit allow_active).
+mkdir -p "${KIOSK_HOME}/.config/openbox"
+
+cp /etc/xdg/openbox/rc.xml "${KIOSK_HOME}/.config/openbox/rc.xml"
+sed -i 's|</keyboard>|  <keybind key="C-A-t"><action name="Execute"><command>xterm -fa Monospace -fs 14</command></action></keybind>\n  <keybind key="C-A-r"><action name="Execute"><command>pkill -f chromium</command></action></keybind>\n</keyboard>|' \
+    "${KIOSK_HOME}/.config/openbox/rc.xml"
+
+cat > "${KIOSK_HOME}/.config/openbox/menu.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_menu xmlns="http://openbox.org/3.4/menu">
+  <menu id="root-menu" label="Kiosk">
+    <item label="Terminal (xterm)">
+      <action name="Execute"><command>xterm -fa Monospace -fs 14</command></action>
+    </item>
+    <item label="Restart Browser">
+      <action name="Execute"><command>pkill -f chromium</command></action>
+    </item>
+    <separator/>
+    <item label="Reboot">
+      <action name="Execute"><command>systemctl reboot</command></action>
+    </item>
+  </menu>
+</openbox_menu>
+EOF
+
+chown -R "${KIOSK_USER}:${KIOSK_USER}" "${KIOSK_HOME}/.config"
 
 echo "[+] Writing health monitor"
 cat > "${KIOSK_DIR}/scripts/health-monitor.py" <<'EOF'
@@ -496,4 +537,7 @@ echo "  - startx launches the X session (openbox + Chromium)"
 echo "  - Chromium opens KIOSK_URL fullscreen at ${SCALE_FACTOR:-2}x scale"
 echo "  - DevTools listens on 127.0.0.1:DEBUG_PORT (tunnel via SSH)"
 echo "  - A+B+C held for REBOOT_HOLD_SECONDS triggers an OS-level reboot"
+echo "  - Ctrl+Alt+T opens a terminal over the kiosk (escape hatch)"
+echo "  - Ctrl+Alt+R kills Chromium (session loop relaunches it)"
+echo "  - Browser log: /opt/kiosk/logs/chromium.log (persistent)"
 echo
