@@ -1,7 +1,8 @@
 #!/bin/bash
 # ==============================================================================
 # KIOSK BOOTSTRAP V3
-# Target: Ubuntu Server 22.04 ARM64 / Raspberry Pi (also works in a VM)
+# Target: Ubuntu Server 24.04 LTS ARM64 / Raspberry Pi 5 (also works in a VM)
+#         (22.04 works too, but 22.04 does NOT boot on a Pi 5 — use 24.04)
 #
 # Goal:
 #   Fresh minimal Ubuntu Server -> run this once -> reboot -> kiosk comes up.
@@ -144,6 +145,10 @@ SCALE_FACTOR="2"
 # explicit mode like "1920x1080" (must be listed by `xrandr`).
 RESOLUTION="auto"
 
+# 1 = software rendering (required in VMs — Chromium crashes on virtual GPUs).
+# 0 = GPU acceleration (use on real hardware like the Pi 5, smoother at 4K).
+DISABLE_GPU="1"
+
 # Hold physical A+B+C keys for this many seconds to force reboot.
 REBOOT_HOLD_SECONDS="15"
 
@@ -195,6 +200,11 @@ CONF="/etc/kiosk/kiosk.conf"
 : "${SCALE_FACTOR:=2}"
 : "${DEBUG_PORT:=9223}"
 : "${RESOLUTION:=auto}"
+# Default to software rendering when unset — safe everywhere, required in VMs.
+: "${DISABLE_GPU:=1}"
+
+GPU_FLAGS=""
+[ "$DISABLE_GPU" = "1" ] && GPU_FLAGS="--disable-gpu"
 
 # Append the kiosk identity to the URL (handles URLs with or without an
 # existing query string).
@@ -274,7 +284,7 @@ while true; do
     log "Launching Chromium -> $KIOSK_URL"
     "$CHROMIUM_BIN" \
         --kiosk \
-        --disable-gpu \
+        $GPU_FLAGS \
         --start-fullscreen \
         --force-device-scale-factor="$SCALE_FACTOR" \
         --high-dpi-support=1 \
