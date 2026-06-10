@@ -540,19 +540,6 @@ while True:
                         # as the keyboard started repeating.
                         pressed[c] = key.keystate in (1, 2)
 
-                if all(pressed.values()):
-                    if start is None:
-                        start = time.time()
-                        log("A+B+C reboot hold started")
-
-                    hold = read_hold_seconds()
-                    if time.time() - start >= hold:
-                        log("Emergency reboot hotkey triggered")
-                        os.system("sync")
-                        os.system("systemctl reboot")
-                else:
-                    start = None
-
         except BlockingIOError:
             pass
         except OSError:
@@ -562,6 +549,21 @@ while True:
                 pass
         except Exception:
             pass
+
+    # Check the hold timer on every poll tick, NOT inside the event handler:
+    # while keys are held no new events may arrive (not all keyboards emit
+    # autorepeat at the evdev level), so an event-driven check never fires.
+    if all(pressed.values()):
+        if start is None:
+            start = time.time()
+            log("A+B+C reboot hold started")
+        elif time.time() - start >= read_hold_seconds():
+            log("Emergency reboot hotkey triggered")
+            os.system("sync")
+            os.system("systemctl reboot")
+            start = None
+    else:
+        start = None
 
     time.sleep(0.05)
 EOF
