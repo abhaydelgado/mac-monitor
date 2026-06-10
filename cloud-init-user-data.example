@@ -1,0 +1,54 @@
+#cloud-config
+# ==============================================================================
+# KIOSK ZERO-TOUCH FIRST BOOT (cloud-init)
+#
+# Per-kiosk install with no monitor, keyboard, or bench Pi.
+#
+# Usage:
+#   1. Flash Ubuntu Server 24.04 LTS (64-bit) to the SD card.
+#   2. Copy this file to the card's boot partition (the FAT volume that
+#      mounts on the Mac, "system-boot") as:  user-data   (no extension,
+#      replacing the file already there).
+#   3. Edit the three CHANGE-ME values below: hostname, KIOSK_ID, ssh key.
+#   4. Put the card in the production Pi and power on. First boot takes
+#      ~10 minutes (apt + snap install), then it reboots into the kiosk.
+#
+# Progress can be watched from another machine once SSH is up:
+#   ssh kioskadmin@<pi-ip>  then  tail -f /var/log/cloud-init-output.log
+# ==============================================================================
+
+hostname: kiosk-lobby                                   # CHANGE-ME per kiosk
+preserve_hostname: false
+
+users:
+  - name: kioskadmin
+    groups: [adm, sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAA...your-public-key-here...      # CHANGE-ME (~/.ssh/*.pub)
+
+package_update: true
+
+write_files:
+  # Written BEFORE the bootstrap runs; the bootstrap preserves an existing
+  # kiosk.conf, so these per-device values survive.
+  - path: /etc/kiosk/kiosk.conf
+    permissions: "0644"
+    content: |
+      KIOSK_URL="http://192.168.10.233:8000/calendar.html"
+      KIOSK_ID="kiosk-lobby"                            # CHANGE-ME per kiosk
+      DEBUG_PORT="9223"
+      SCALE_FACTOR="2"
+      RESOLUTION="auto"
+      DISABLE_GPU="0"
+      REBOOT_HOLD_SECONDS="15"
+      HEALTH_INTERVAL_SECONDS="60"
+      HEALTH_FAILS_BEFORE_BROWSER_RESTART="5"
+      HEALTH_BROWSER_RESTARTS_BEFORE_REBOOT="3"
+      CHROMIUM_MAX_MEMORY_MB="0"
+
+runcmd:
+  - git clone https://github.com/abhaydelgado/mac-monitor.git /root/mac-monitor
+  - bash /root/mac-monitor/kiosk-bootstrap-v3.sh >> /var/log/kiosk-bootstrap.log 2>&1
+  - reboot
