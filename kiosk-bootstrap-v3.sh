@@ -179,6 +179,71 @@ Section "OutputClass"
 EndSection
 EOF
 
+echo "[+] Configuring silent boot with splash cover"
+apt-get install -y plymouth plymouth-themes
+
+# Custom Plymouth theme: shows splash.png centered on black if one was
+# shipped next to this script, plain black otherwise.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mkdir -p /usr/share/plymouth/themes/kiosk
+if [ -f "${SCRIPT_DIR}/splash.png" ]; then
+    cp "${SCRIPT_DIR}/splash.png" /usr/share/plymouth/themes/kiosk/splash.png
+fi
+
+cat > /usr/share/plymouth/themes/kiosk/kiosk.plymouth <<'EOF'
+[Plymouth Theme]
+Name=Kiosk
+Description=Black screen with optional cover image
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/kiosk
+ScriptFile=/usr/share/plymouth/themes/kiosk/kiosk.script
+EOF
+
+cat > /usr/share/plymouth/themes/kiosk/kiosk.script <<'EOF'
+Window.SetBackgroundTopColor(0, 0, 0);
+Window.SetBackgroundBottomColor(0, 0, 0);
+
+image = Image("splash.png");
+if (image) {
+    screen_w = Window.GetWidth();
+    screen_h = Window.GetHeight();
+    ratio_w = screen_w / image.GetWidth();
+    ratio_h = screen_h / image.GetHeight();
+    ratio = ratio_w;
+    if (ratio_h < ratio_w)
+        ratio = ratio_h;
+    scaled = image.Scale(image.GetWidth() * ratio, image.GetHeight() * ratio);
+    sprite = Sprite(scaled);
+    sprite.SetPosition((screen_w - scaled.GetWidth()) / 2,
+                       (screen_h - scaled.GetHeight()) / 2, 0);
+}
+EOF
+
+plymouth-set-default-theme kiosk
+update-initramfs -u
+
+# Silence kernel/systemd text on the console.
+QUIET_PARAMS="quiet splash loglevel=3 logo.nologo vt.global_cursor_off=1 systemd.show_status=false plymouth.ignore-serial-consoles"
+if [ -f /boot/firmware/cmdline.txt ]; then
+    # Raspberry Pi: single-line kernel cmdline.
+    for p in ${QUIET_PARAMS}; do
+        grep -qw "${p}" /boot/firmware/cmdline.txt || sed -i "s/\$/ ${p}/" /boot/firmware/cmdline.txt
+    done
+    # Also silence the firmware's rainbow splash before the kernel loads.
+    grep -q '^disable_splash=' /boot/firmware/config.txt 2>/dev/null || \
+        echo 'disable_splash=1' >> /boot/firmware/config.txt
+elif [ -f /etc/default/grub ]; then
+    # VM / generic install.
+    sed -i "s/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT=\"${QUIET_PARAMS}\"/" /etc/default/grub
+    update-grub
+fi
+
+# No "Last login" / motd noise on the autologin console.
+touch "${KIOSK_HOME}/.hushlogin"
+chown "${KIOSK_USER}:${KIOSK_USER}" "${KIOSK_HOME}/.hushlogin"
+
 echo "[+] Setting default target to multi-user (no graphical.target / DM)"
 systemctl set-default multi-user.target
 
@@ -281,6 +346,9 @@ fi
 xset s off || true
 xset -dpms || true
 xset s noblank || true
+
+# Black root window so the moment before Chromium paints isn't gray.
+xsetroot -solid black || true
 
 # Apply the configured resolution to the first connected output. Without this,
 # a VM's virtual display often comes up at a tiny default mode.

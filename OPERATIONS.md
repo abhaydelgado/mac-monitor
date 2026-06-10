@@ -45,6 +45,13 @@ keyboard works. A+B+C reads raw input -- works even if X/browser are dead.
 Conf changes need only Ctrl+Alt+R (browser settings) -- except RESOLUTION,
 which is applied at session start: reboot for that one.
 
+## Boot Splash
+
+Boot text is hidden (quiet kernel + Plymouth). To show a cover image during
+boot, place a PNG named  splash.png  in the repo folder before running the
+bootstrap (re-run it to apply). No image = plain black boot. The image is
+scaled to fit and centered on black; match the panel aspect for full bleed.
+
 ## Recovery Ladder
 
 | Situation               | Do this                                          |
