@@ -1,6 +1,6 @@
-# Kiosk Cheat Sheet
+# Kiosk Operations Reference
 
-Readable on the device with:  cat ~/mac-monitor/CHEATSHEET.md
+Readable on the device with:  cat ~/mac-monitor/OPERATIONS.md
 
 ## Keyboard Shortcuts
 
