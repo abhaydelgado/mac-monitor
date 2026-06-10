@@ -114,6 +114,11 @@ mkdir -p "${KIOSK_DIR}/scripts"
 mkdir -p "${KIOSK_DIR}/logs"
 
 echo "[+] Writing kiosk config"
+# Never clobber an existing config — re-running the bootstrap must preserve
+# per-device settings (URL, scale, resolution).
+if [ -f "${KIOSK_CONF}" ]; then
+    echo "[+] ${KIOSK_CONF} already exists; keeping it"
+else
 cat > "${KIOSK_CONF}" <<'EOF'
 # ==============================================================================
 # Kiosk configuration
@@ -127,8 +132,12 @@ KIOSK_URL="http://192.168.10.233:8000/calendar.html?id=kiosk-facility"
 # Give each kiosk a unique port if you tunnel several at once.
 DEBUG_PORT="9223"
 
-# Device scale factor. 2 = crisp rendering on a 4K display.
+# Device scale factor. 2 = crisp rendering on a 4K display, 1 for 1080p/VMs.
 SCALE_FACTOR="2"
+
+# Display resolution: "auto" picks the output's preferred mode, or set an
+# explicit mode like "1920x1080" (must be listed by `xrandr`).
+RESOLUTION="auto"
 
 # Hold physical A+B+C keys for this many seconds to force reboot.
 REBOOT_HOLD_SECONDS="15"
@@ -141,6 +150,7 @@ HEALTH_BROWSER_RESTARTS_BEFORE_REBOOT="3"
 # Browser memory ceiling in MB. Set to 0 to disable memory-based restart.
 CHROMIUM_MAX_MEMORY_MB="0"
 EOF
+fi
 
 chmod 644 "${KIOSK_CONF}"
 
@@ -178,6 +188,7 @@ CONF="/etc/kiosk/kiosk.conf"
 : "${KIOSK_URL:=about:blank}"
 : "${SCALE_FACTOR:=2}"
 : "${DEBUG_PORT:=9223}"
+: "${RESOLUTION:=auto}"
 
 log() { logger -t kiosk-session "$*"; echo "kiosk-session: $*"; }
 
@@ -214,6 +225,19 @@ xset s off || true
 xset -dpms || true
 xset s noblank || true
 
+# Apply the configured resolution to the first connected output. Without this,
+# a VM's virtual display often comes up at a tiny default mode.
+XOUTPUT="$(xrandr --query 2>/dev/null | awk '/ connected/{print $1; exit}')"
+if [ -n "$XOUTPUT" ]; then
+    if [ "$RESOLUTION" = "auto" ]; then
+        xrandr --output "$XOUTPUT" --auto || true
+    elif ! xrandr --output "$XOUTPUT" --mode "$RESOLUTION"; then
+        log "Mode $RESOLUTION not available on $XOUTPUT; falling back to auto"
+        xrandr --output "$XOUTPUT" --auto || true
+    fi
+    log "Display: $(xrandr --query | awk '/\*/{print $1; exit}') on $XOUTPUT"
+fi
+
 # Hide the mouse pointer almost immediately.
 pkill -x unclutter || true
 unclutter -idle 0.1 -root >/tmp/kiosk-unclutter.log 2>&1 &
@@ -223,8 +247,15 @@ unclutter -idle 0.1 -root >/tmp/kiosk-unclutter.log 2>&1 &
 openbox &
 sleep 1
 
-# Launch Chromium and relaunch it if it ever exits.
+# Launch Chromium and relaunch it if it ever exits. While the pause flag
+# exists (Ctrl+Alt+Q), stay closed so a maintainer can work undisturbed;
+# Ctrl+Alt+R removes the flag and brings the browser back.
+PAUSE_FLAG="/tmp/kiosk-pause"
 while true; do
+    if [ -f "$PAUSE_FLAG" ]; then
+        sleep 2
+        continue
+    fi
     log "Launching Chromium -> $KIOSK_URL"
     "$CHROMIUM_BIN" \
         --kiosk \
@@ -265,7 +296,7 @@ echo "[+] Writing openbox config (terminal escape hatch)"
 mkdir -p "${KIOSK_HOME}/.config/openbox"
 
 cp /etc/xdg/openbox/rc.xml "${KIOSK_HOME}/.config/openbox/rc.xml"
-sed -i 's|</keyboard>|  <keybind key="C-A-t"><action name="Execute"><command>xterm -fa Monospace -fs 14</command></action></keybind>\n  <keybind key="C-A-r"><action name="Execute"><command>pkill -f chromium</command></action></keybind>\n</keyboard>|' \
+sed -i 's|</keyboard>|  <keybind key="C-A-t"><action name="Execute"><command>xterm -fa Monospace -fs 14</command></action></keybind>\n  <keybind key="C-A-r"><action name="Execute"><command>sh -c "rm -f /tmp/kiosk-pause; pkill -f chromium"</command></action></keybind>\n  <keybind key="C-A-q"><action name="Execute"><command>sh -c "touch /tmp/kiosk-pause; pkill -f chromium"</command></action></keybind>\n</keyboard>|' \
     "${KIOSK_HOME}/.config/openbox/rc.xml"
 
 cat > "${KIOSK_HOME}/.config/openbox/menu.xml" <<'EOF'
@@ -276,7 +307,10 @@ cat > "${KIOSK_HOME}/.config/openbox/menu.xml" <<'EOF'
       <action name="Execute"><command>xterm -fa Monospace -fs 14</command></action>
     </item>
     <item label="Restart Browser">
-      <action name="Execute"><command>pkill -f chromium</command></action>
+      <action name="Execute"><command>sh -c "rm -f /tmp/kiosk-pause; pkill -f chromium"</command></action>
+    </item>
+    <item label="Close Browser (stay closed)">
+      <action name="Execute"><command>sh -c "touch /tmp/kiosk-pause; pkill -f chromium"</command></action>
     </item>
     <separator/>
     <item label="Reboot">
@@ -547,6 +581,7 @@ echo "  - Chromium opens KIOSK_URL fullscreen at ${SCALE_FACTOR:-2}x scale"
 echo "  - DevTools listens on 127.0.0.1:DEBUG_PORT (tunnel via SSH)"
 echo "  - A+B+C held for REBOOT_HOLD_SECONDS triggers an OS-level reboot"
 echo "  - Ctrl+Alt+T opens a terminal over the kiosk (escape hatch)"
-echo "  - Ctrl+Alt+R kills Chromium (session loop relaunches it)"
+echo "  - Ctrl+Alt+Q closes Chromium and keeps it closed (maintenance)"
+echo "  - Ctrl+Alt+R restarts Chromium / resumes after Ctrl+Alt+Q"
 echo "  - Browser log: /opt/kiosk/logs/chromium.log (persistent)"
 echo
