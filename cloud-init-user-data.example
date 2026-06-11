@@ -20,11 +20,21 @@
 hostname: kiosk-lobby                                   # CHANGE-ME per kiosk
 preserve_hostname: false
 
+# Allow SSH login with a password (in addition to any key below).
+ssh_pwauth: true
+
 users:
   - name: kioskadmin
     groups: [adm, sudo]
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: false
+    # Set the login password: generate the hash on your Mac with
+    #   openssl passwd -6
+    # and paste the full $6$... string here.
+    hashed_passwd: "$6$CHANGE-ME...paste-hash-here..."
+    # Optional but recommended: passwordless key login from your Mac
+    # (create a key with: ssh-keygen -t ed25519). Delete if unused.
     ssh_authorized_keys:
       - ssh-ed25519 AAAA...your-public-key-here...      # CHANGE-ME (~/.ssh/*.pub)
 
