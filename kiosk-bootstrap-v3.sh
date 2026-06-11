@@ -221,7 +221,11 @@ if (image) {
 }
 EOF
 
-plymouth-set-default-theme kiosk
+# Ubuntu/Debian select the Plymouth theme via update-alternatives
+# (plymouth-set-default-theme is a Fedora-ism and doesn't exist here).
+update-alternatives --install /usr/share/plymouth/themes/default.plymouth \
+    default.plymouth /usr/share/plymouth/themes/kiosk/kiosk.plymouth 200
+update-alternatives --set default.plymouth /usr/share/plymouth/themes/kiosk/kiosk.plymouth
 update-initramfs -u
 
 # Silence kernel/systemd text on the console.
