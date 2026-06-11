@@ -95,6 +95,20 @@ fi
 echo "[+] Chromium command: ${CHROMIUM_BIN}"
 
 echo "[+] Creating kiosk user"
+# The kiosk user is a dedicated, unprivileged, passwordless display account.
+# If an account with this name already exists AND has admin rights, it is the
+# operator's login (e.g. named "kiosk" in Raspberry Pi Imager) — proceeding
+# would delete its password and lock them out of SSH. Refuse loudly instead.
+if id "${KIOSK_USER}" >/dev/null 2>&1 && id -nG "${KIOSK_USER}" | grep -qw sudo; then
+    echo "[!] User '${KIOSK_USER}' already exists and is in the sudo group."
+    echo "[!] The kiosk display user must be a separate unprivileged account."
+    echo "[!] Create your admin account first, e.g.:"
+    echo "      sudo adduser kioskadmin && sudo usermod -aG adm,sudo kioskadmin"
+    echo "    then remove admin rights from '${KIOSK_USER}':"
+    echo "      sudo deluser ${KIOSK_USER} sudo"
+    echo "    and re-run this script."
+    exit 1
+fi
 if ! id "${KIOSK_USER}" >/dev/null 2>&1; then
     useradd -m -s /bin/bash "${KIOSK_USER}"
 fi
